@@ -5,8 +5,6 @@
 
 #include <format>
 
-#include "ffi.rs.h"
-
 using namespace std::string_literals;
 
 namespace cssparser
@@ -28,12 +26,7 @@ RgbaData::RgbaData(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 
 std::string RgbaData::toString() const
 {
-    return std::format("RGBA({}, {}, {}, {})", m_r, m_g, m_r, m_a);
-}
-
-RgbaData RgbaData::fromRust(rust::Rgba rustData)
-{
-    return RgbaData{rustData.r, rustData.g, rustData.b, rustData.a};
+    return std::format("RGBA({}, {}, {}, {})", m_r, m_g, m_b, m_a);
 }
 
 CustomColorData::CustomColorData()
@@ -60,16 +53,6 @@ std::string CustomColorData::toString() const
     return std::vformat("CustomColor(source: {}, arguments: {})"s, std::make_format_args(m_source, args));
 }
 
-CustomColorData CustomColorData::fromRust(const rust::CustomColor &rustData)
-{
-    std::vector<std::string> arguments;
-    std::ranges::transform(rustData.arguments, std::back_inserter(arguments), [](auto arg) {
-        return std::string(arg);
-    });
-
-    return CustomColorData{std::string(rustData.source), arguments};
-}
-
 MixOperationData::MixOperationData()
 {
 }
@@ -82,12 +65,7 @@ MixOperationData::MixOperationData(const std::shared_ptr<Color> &other, float am
 
 std::string MixOperationData::toString() const
 {
-    return std::format("MixOperationData(other: {}, amount: {})", m_other->toString(), m_amount);
-}
-
-MixOperationData MixOperationData::fromRust(const rust::MixColorOperationValues &rustData)
-{
-    return MixOperationData{std::make_shared<Color>(Color::fromRust(rustData.other)), rustData.amount};
+    return std::format("MixOperationData(other: {}, amount: {})", m_other ? m_other->toString() : "None", m_amount);
 }
 
 SetOperationData::SetOperationData()
@@ -107,39 +85,13 @@ std::string SetOperationData::toString() const
     return std::format("SetOperationData(r: {}, g: {}, b: {}, a: {})", m_r.value_or(-1), m_g.value_or(-1), m_b.value_or(-1), m_a.value_or(-1));
 }
 
-SetOperationData SetOperationData::fromRust(const rust::SetColorOperationValues &rustData)
-{
-    auto result = SetOperationData{};
-    if (rustData.r < 0) {
-        result.m_r = std::nullopt;
-    } else {
-        result.m_r = uint8_t(rustData.r);
-    }
-    if (rustData.g < 0) {
-        result.m_g = std::nullopt;
-    } else {
-        result.m_g = uint8_t(rustData.g);
-    }
-    if (rustData.b < 0) {
-        result.m_b = std::nullopt;
-    } else {
-        result.m_b = uint8_t(rustData.b);
-    }
-    if (rustData.a < 0) {
-        result.m_a = std::nullopt;
-    } else {
-        result.m_a = uint8_t(rustData.a);
-    }
-    return result;
-}
-
 ModifiedColorData::ModifiedColorData()
 {
 }
 
 std::string ModifiedColorData::toString() const
 {
-    const auto color = m_color->toString();
+    const auto color = m_color ? m_color->toString() : "None"s;
 
     switch (m_operation) {
     case Operation::Add: {
@@ -160,62 +112,11 @@ std::string ModifiedColorData::toString() const
     }
     case Operation::Mix: {
         const auto data = std::get<MixOperationData>(m_data).toString();
-        return std::vformat("ModifiedColor(color: {}, operation: mix, data: {})", std::make_format_args(color, data));
+        return std::vformat("ModifiedColor(color: {}, operation: mix, data: {})"s, std::make_format_args(color, data));
     }
     default:
         return "ModifiedColor(unknown operation)"s;
     }
-}
-
-inline ModifiedColorData::Operation convertOperation(rust::ColorOperationType type)
-{
-    switch (type) {
-    case rust::ColorOperationType::Add:
-        return ModifiedColorData::Operation::Add;
-    case rust::ColorOperationType::Subtract:
-        return ModifiedColorData::Operation::Subtract;
-    case rust::ColorOperationType::Multiply:
-        return ModifiedColorData::Operation::Multiply;
-    case rust::ColorOperationType::Set:
-        return ModifiedColorData::Operation::Set;
-    case rust::ColorOperationType::Mix:
-        return ModifiedColorData::Operation::Mix;
-    }
-
-    assert(false && "Mismatch between ModifiedColor operations in C++ and Rust, update C++ code!");
-    return ModifiedColorData::Operation::Unknown;
-}
-
-ModifiedColorData ModifiedColorData::fromRust(const rust::ModifiedColor &rustData)
-{
-    auto result = ModifiedColorData{};
-    result.m_color = std::make_shared<Color>(Color::fromRust(rustData.color));
-    result.m_operation = convertOperation(rustData.operation_type());
-
-    switch (rustData.operation_type()) {
-    case rust::ColorOperationType::Add:
-    case rust::ColorOperationType::Subtract:
-    case rust::ColorOperationType::Multiply:
-        result.m_data = std::make_shared<Color>(Color::fromRust(rustData.color_value()));
-        break;
-    case rust::ColorOperationType::Set: {
-        const auto setData = rustData.set_values();
-        result.m_data = SetOperationData{
-            setData.r < 0 ? std::nullopt : std::optional<uint8_t>(setData.r),
-            setData.g < 0 ? std::nullopt : std::optional<uint8_t>(setData.g),
-            setData.b < 0 ? std::nullopt : std::optional<uint8_t>(setData.b),
-            setData.a < 0 ? std::nullopt : std::optional<uint8_t>(setData.a),
-        };
-        break;
-    }
-    case rust::ColorOperationType::Mix: {
-        const auto mixData = rustData.mix_values();
-        result.m_data = MixOperationData{std::make_shared<Color>(Color::fromRust(mixData.other)), mixData.amount};
-        break;
-    }
-    }
-
-    return result;
 }
 
 Color::Color()
@@ -236,46 +137,6 @@ std::string Color::toString() const
     default:
         return "Color(Unknown)"s;
     }
-}
-
-inline Color::Type convertType(rust::ColorType type)
-{
-    switch (type) {
-    case rust::ColorType::Empty:
-        return Color::Type::Empty;
-    case rust::ColorType::Rgba:
-        return Color::Type::Rgba;
-    case rust::ColorType::Custom:
-        return Color::Type::Custom;
-    case rust::ColorType::Modified:
-        return Color::Type::Modified;
-    }
-
-    assert(false && "Mismatch between Color types in C++ and Rust, update C++ code!");
-    return Color::Type::Empty;
-}
-
-Color Color::fromRust(const ::rust::cxxbridge1::Box<rust::Color> &color)
-{
-    auto result = Color{};
-    result.m_type = convertType(color->color_type());
-
-    switch (color->color_type()) {
-    case rust::ColorType::Empty:
-        result.m_data = std::nullopt;
-        break;
-    case rust::ColorType::Rgba:
-        result.m_data = RgbaData::fromRust(color->to_rgba());
-        break;
-    case rust::ColorType::Custom:
-        result.m_data = CustomColorData::fromRust(color->to_custom());
-        break;
-    case rust::ColorType::Modified:
-        result.m_data = ModifiedColorData::fromRust(color->to_modified());
-        break;
-    }
-
-    return result;
 }
 
 }

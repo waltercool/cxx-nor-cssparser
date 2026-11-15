@@ -7,3 +7,4 @@ build
 *.kate-swp
 /rust/target
 .clang-format
+/.scratch/

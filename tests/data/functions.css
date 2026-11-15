@@ -1,0 +1,55 @@
+/* Test for value functions and nesting. */
+
+@property color {
+    syntax: "<color>";
+    inherits: true;
+    initial-value: #ff0000;
+}
+
+@property background {
+    syntax: "<color>";
+    inherits: false;
+}
+
+@property width {
+    syntax: "<length>";
+    inherits: false;
+}
+
+box {
+    color: red;
+    background: mix(#ff0000, #0000ff, 0.5);
+    width: var(--missing, 10px);
+}
+
+custom {
+    background: custom-color("palette", "primary", "500");
+}
+
+mod {
+    background: modify-color(#ff0000 set-alpha 0.5);
+}
+
+parent child {
+    color: currentcolor;
+}
+
+outer {
+    color: blue;
+
+    &.inner {
+        color: #123456;
+    }
+
+    > direct {
+        color: hsl(120, 100%, 50%);
+    }
+}
+
+:root {
+    color: black;
+}
+
+part::part(slotted) {
+    color: white;
+}

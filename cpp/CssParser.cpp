@@ -3,29 +3,21 @@
 
 #include "CssParser.h"
 
-#include <iostream>
-#include <fstream>
+#include <iterator>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "ffi.rs.h"
+#include "Parser.h"
 
-using namespace std::string_literals;
-
-using namespace cssparser;
+namespace cssparser
+{
 
 Property::Property(const std::string &name, const std::vector<Value> &values)
     : m_name(name)
     , m_values(values)
 {
-}
-
-Property Property::fromRust(const rust::Property &rustData)
-{
-    std::vector<Value> values;
-    for (const auto &rustValue : rustData.values()) {
-        values.push_back(Value::fromRust(rustValue));
-    }
-
-    return Property{std::string(rustData.name()), values};
 }
 
 Rule::Rule()
@@ -38,35 +30,49 @@ Rule::Rule(const Selector &selector, const std::vector<Property> &properties)
 {
 }
 
-Rule Rule::fromRust(const rust::StyleRule &rule)
-{
-    auto result = Rule{};
-    result.m_selector = Selector::fromRust(rule.selector());
-
-    for (const auto &property : rule.properties()) {
-        result.m_properties.push_back(Property::fromRust(property));
-    }
-
-    return result;
-}
-
-struct StyleSheet::Private
-{
-    Private(std::filesystem::path path)
-        : path(path)
-        , stylesheet(rust::create_stylesheet(path.string()))
+struct StyleSheet::Private {
+    explicit Private(std::filesystem::path path)
+        : path(std::move(path))
     {
     }
 
-    void update();
+    /*!
+     * Parse \a text as a stylesheet that originated from the file \a sourcePath
+     * and append the resulting rules, errors and paths to this sheet.
+     */
+    void parseText(const std::string &text, const std::filesystem::path &sourcePath);
+    /*!
+     * Read \a filePath from disk, parse it and append the results. A missing or
+     * unreadable file is reported as an error, never thrown.
+     */
+    void parseFile(const std::filesystem::path &filePath);
 
     std::filesystem::path path;
 
-    ::rust::Box<rust::StyleSheet> stylesheet;
     std::vector<Rule> rules;
     std::vector<Error> errors;
     std::vector<std::filesystem::path> paths;
 };
+
+void StyleSheet::Private::parseText(const std::string &text, const std::filesystem::path &sourcePath)
+{
+    std::set<std::filesystem::path> visited;
+    auto sheet = detail::parseSheetText(text, sourcePath, visited);
+
+    paths.insert(paths.end(), std::make_move_iterator(sheet.paths.begin()), std::make_move_iterator(sheet.paths.end()));
+    rules.insert(rules.end(), std::make_move_iterator(sheet.rules.begin()), std::make_move_iterator(sheet.rules.end()));
+    errors.insert(errors.end(), std::make_move_iterator(sheet.errors.begin()), std::make_move_iterator(sheet.errors.end()));
+}
+
+void StyleSheet::Private::parseFile(const std::filesystem::path &filePath)
+{
+    std::set<std::filesystem::path> visited;
+    auto sheet = detail::parseSheetFile(filePath, visited);
+
+    paths.insert(paths.end(), std::make_move_iterator(sheet.paths.begin()), std::make_move_iterator(sheet.paths.end()));
+    rules.insert(rules.end(), std::make_move_iterator(sheet.rules.begin()), std::make_move_iterator(sheet.rules.end()));
+    errors.insert(errors.end(), std::make_move_iterator(sheet.errors.begin()), std::make_move_iterator(sheet.errors.end()));
+}
 
 StyleSheet::StyleSheet(const std::filesystem::path &path)
     : d(std::make_unique<Private>(path))
@@ -92,53 +98,30 @@ std::span<const std::filesystem::path> StyleSheet::paths() const
 
 void StyleSheet::parse()
 {
-    try {
-        d->stylesheet->parse();
-    } catch (const std::exception &e) {
-        d->errors.push_back(Error{
-            .file = d->path,
-            .line = 0,
-            .column = 0,
-            .message = e.what(),
-        });
-
-        return;
-    }
-
-    d->update();
+    d->parseFile(d->path);
 }
 
 void StyleSheet::parseString(const std::string &source)
 {
-    d->stylesheet->parse_string(source);
-    d->update();
+    // The path of this sheet is used as the origin for error reporting and for
+    // resolving relative url() values.
+    d->parseText(source, d->path);
 }
 
-void cssparser::StyleSheet::import(const std::filesystem::path &path)
+void StyleSheet::import(const std::filesystem::path &path)
 {
-    d->stylesheet->import_file(path.string());
+    std::filesystem::path resolved = path;
+    if (!resolved.is_absolute()) {
+        auto parent = d->path.parent_path();
+        if (parent.empty()) {
+            // No base directory to resolve against; use the path as given.
+            resolved = path;
+        } else {
+            resolved = parent / path;
+        }
+    }
+
+    d->parseFile(resolved.lexically_normal());
 }
 
-void StyleSheet::Private::update()
-{
-    rules.clear();
-    for (const auto &entry : stylesheet->rules()) {
-        auto rule = Rule::fromRust(entry);
-        rules.push_back(rule);
-    }
-
-    errors.clear();
-    for (const auto &entry : stylesheet->errors()) {
-        errors.push_back(Error{
-            .file = std::string(entry.file),
-            .line = entry.line,
-            .column = entry.column,
-            .message = std::string(entry.message),
-        });
-    }
-
-    paths.clear();
-    for (const auto &entry : stylesheet->paths()) {
-        paths.push_back(std::filesystem::path(std::string(entry)));
-    }
 }

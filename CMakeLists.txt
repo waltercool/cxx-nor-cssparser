@@ -14,8 +14,6 @@ feature_summary(WHAT REQUIRED_PACKAGES_NOT_FOUND FATAL_ON_MISSING_REQUIRED_PACKA
 
 set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
-find_package(Corrosion REQUIRED)
-
 include(GNUInstallDirs)
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
 
@@ -32,16 +30,19 @@ if (BUILD_DOCS)
     include(ECMGenerateQDoc)
 endif()
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_AUTOMOC FALSE)
 set(CMAKE_AUTORCC FALSE)
 
 kde_enable_exceptions()
 
-add_subdirectory(rust)
 add_subdirectory(cpp)
 
 add_subdirectory(examples)
+
+if (BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
 
 ecm_setup_version(
     PROJECT

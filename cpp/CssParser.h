@@ -11,11 +11,6 @@
 
 namespace cssparser
 {
-namespace rust
-{
-struct Property;
-struct StyleRule;
-}
 
 /*!
  * \class cssparser::Property
@@ -62,9 +57,6 @@ public:
         return m_values.at(index);
     }
 
-    // Internal. Convert from a rust Property to a C++ Property.
-    static Property fromRust(const rust::Property &rustData);
-
 private:
     std::string m_name;
     std::vector<Value> m_values;
@@ -103,9 +95,6 @@ public:
     {
         return std::span<const Property>(m_properties.cbegin(), m_properties.cend());
     }
-
-    // Internal. Convert from a rust StyleRule to a C++ Rule.
-    static Rule fromRust(const rust::StyleRule &rustData);
 
 private:
     Selector m_selector;

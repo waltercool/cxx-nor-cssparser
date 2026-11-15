@@ -7,8 +7,3 @@ version = 1
 path = "**/README.md"
 SPDX-License-Identifier = "BSD-2-Clause"
 SPDX-FileCopyrightText = "2025 Arjen Hiemstra <ahiemstra@heimr.nl>"
-
-[[annotations]]
-path = "**/Cargo.lock"
-SPDX-License-Identifier = "BSD-2-Clause"
-SPDX-FileCopyrightText = "2025 Arjen Hiemstra <ahiemstra@heimr.nl>"

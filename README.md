@@ -1,16 +1,17 @@
 # cxx-rust-cssparser
 
-A C++ library for parsing CSS that uses the Rust cssparser crate internally.
+A C++ library for parsing CSS.
+
+Despite the historical name, the library is implemented entirely in C++; no Rust
+toolchain is required to build it.
 
 ## Getting Started
 
-To build cxx-rust-cssparser you will need both a C++ and Rust compiler, as well
-as [CMake] and [Corrosion]. The Rust code has several dependencies, these are
-handled by Cargo at build time. Build the project like any other CMake project,
-it will build the Rust parts while building the rest.
+To build cxx-rust-cssparser you will need a C++23 compiler as well as [CMake]
+and [ECM]. Build the project like any other CMake project.
 
 [CMake]: https://www.cmake.org
-[Corrosion]: https://github.com/corrosion-rs/corrosion
+[ECM]: https://commits.kde.org/extra-cmake-modules
 
 ## Overview
 

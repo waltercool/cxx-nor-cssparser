@@ -3,7 +3,10 @@
 
 #pragma once
 
+#include <optional>
 #include <span>
+#include <string>
+#include <vector>
 
 #include "Value.h"
 
@@ -11,12 +14,6 @@
 
 namespace cssparser
 {
-namespace rust
-{
-struct AttributeMatch;
-struct SelectorPart;
-struct Selector;
-}
 
 /*!
  * \class cssparser::AttributeMatch
@@ -113,8 +110,6 @@ public:
 
     std::string toString() const;
 
-    static SelectorPart fromRust(const rust::SelectorPart &rustData);
-
 private:
     Kind m_kind = Kind::Unknown;
     Value m_value;
@@ -138,8 +133,6 @@ public:
     }
 
     std::string toString() const;
-
-    static Selector fromRust(const rust::Selector &rustData);
 
 private:
     std::vector<SelectorPart> m_parts;

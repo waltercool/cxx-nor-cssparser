@@ -5,12 +5,14 @@
 
 #include <format>
 
-#include "ffi.rs.h"
-
 using namespace std::string_literals;
 
 namespace cssparser
 {
+
+Value::Value()
+{
+}
 
 Dimension::Dimension()
 {
@@ -54,72 +56,9 @@ std::string Dimension::toString() const
     return std::format("{} (Unknown unit)", m_value);
 }
 
-inline Dimension::Unit convertUnit(rust::Unit unit)
+namespace
 {
-    switch (unit) {
-    case rust::Unit::Unknown:
-        return Dimension::Unit::Unknown;
-    case rust::Unit::Unsupported:
-        return Dimension::Unit::Unsupported;
-    case rust::Unit::Number:
-        return Dimension::Unit::Number;
-    case rust::Unit::Px:
-        return Dimension::Unit::Px;
-    case rust::Unit::Em:
-        return Dimension::Unit::Em;
-    case rust::Unit::Rem:
-        return Dimension::Unit::Rem;
-    case rust::Unit::Pt:
-        return Dimension::Unit::Pt;
-    case rust::Unit::Percent:
-        return Dimension::Unit::Percent;
-    case rust::Unit::Degrees:
-        return Dimension::Unit::Degrees;
-    case rust::Unit::Radians:
-        return Dimension::Unit::Radians;
-    case rust::Unit::Seconds:
-        return Dimension::Unit::Seconds;
-    case rust::Unit::Milliseconds:
-        return Dimension::Unit::Milliseconds;
-    }
-
-    assert(false && "Mismatch between unit types in C++ and Rust, update C++ code!");
-    return Dimension::Unit::Unknown;
-}
-
-Dimension Dimension::fromRust(rust::Dimension rustData)
-{
-    return Dimension{convertUnit(rustData.unit), rustData.value};
-}
-
-Value::Value()
-{
-}
-
-inline Value::Type convertType(rust::ValueType rustType)
-{
-    switch (rustType) {
-    case rust::ValueType::Empty:
-        return Value::Type::Empty;
-    case rust::ValueType::Dimension:
-        return Value::Type::Dimension;
-    case rust::ValueType::String:
-        return Value::Type::String;
-    case rust::ValueType::Color:
-        return Value::Type::Color;
-    case rust::ValueType::Image:
-        return Value::Type::Image;
-    case rust::ValueType::Url:
-        return Value::Type::Url;
-    case rust::ValueType::Integer:
-        return Value::Type::Integer;
-    }
-
-    assert(false && "Mismatch between value types in C++ and Rust, update C++ code!");
-    return Value::Type::Empty;
-}
-
-inline std::string valueTypeToString(Value::Type type)
+std::string_view valueTypeToString(Value::Type type)
 {
     switch (type) {
     case Value::Type::Empty:
@@ -140,6 +79,7 @@ inline std::string valueTypeToString(Value::Type type)
 
     return "Unknown"s;
 }
+} // namespace
 
 std::string Value::toString() const
 {
@@ -164,37 +104,6 @@ std::string Value::toString() const
     }
 
     return std::format("Value(type: {}, data: {})", valueTypeToString(m_type), data);
-}
-
-Value Value::fromRust(const rust::Value &rustData)
-{
-    auto result = Value{};
-    result.m_type = convertType(rustData.value_type());
-
-    switch (rustData.value_type()) {
-    case rust::ValueType::Empty:
-        break;
-    case rust::ValueType::Dimension:
-        result.m_data = Dimension::fromRust(rustData.to_dimension());
-        break;
-    case rust::ValueType::String:
-        result.m_data = std::string(rustData.to_string());
-        break;
-    case rust::ValueType::Image:
-        result.m_data = std::string(rustData.to_image());
-        break;
-    case rust::ValueType::Url:
-        result.m_data = std::string(rustData.to_url());
-        break;
-    case rust::ValueType::Color:
-        result.m_data = Color::Color::fromRust(rustData.to_color());
-        break;
-    case rust::ValueType::Integer:
-        result.m_data = rustData.to_integer();
-        break;
-    }
-
-    return result;
 }
 
 }

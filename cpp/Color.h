@@ -12,29 +12,8 @@
 
 #include "cssparser_export.h"
 
-namespace rust
-{
-// Note that this namespace is an implementation detail, but without it, we
-// cannot forward-declare the right type for Box<Color>.
-inline namespace cxxbridge1
-{
-template<typename T>
-class Box;
-}
-}
-
 namespace cssparser
 {
-namespace rust
-{
-struct Rgba;
-struct CustomColor;
-struct SetColorOperationValues;
-struct MixColorOperationValues;
-struct ModifiedColor;
-struct Color;
-}
-
 namespace Color
 {
 class Color;
@@ -78,8 +57,6 @@ public:
 
     std::string toString() const;
 
-    static RgbaData fromRust(rust::Rgba rustData);
-
 private:
     uint8_t m_r = 0;
     uint8_t m_g = 0;
@@ -110,7 +87,6 @@ public:
 
     std::string toString() const;
 
-    static CustomColorData fromRust(const rust::CustomColor &rustData);
 
 private:
     std::string m_source;
@@ -140,7 +116,6 @@ public:
 
     std::string toString() const;
 
-    static MixOperationData fromRust(const rust::MixColorOperationValues &rustData);
 
 private:
     std::shared_ptr<Color> m_other;
@@ -180,7 +155,6 @@ public:
 
     std::string toString() const;
 
-    static SetOperationData fromRust(const rust::SetColorOperationValues &rustData);
 
 private:
     std::optional<uint8_t> m_r;
@@ -234,7 +208,6 @@ public:
 
     std::string toString() const;
 
-    static ModifiedColorData fromRust(const rust::ModifiedColor &rustData);
 
 private:
     Operation m_operation = Operation::Unknown;
@@ -285,9 +258,6 @@ public:
      * Returns a string representation of this Color.
      */
     std::string toString() const;
-
-    // Internal. Converts a rust Color to a C++ Color.
-    static Color fromRust(const ::rust::cxxbridge1::Box<rust::Color> &color);
 
 private:
     Type m_type = Type::Empty;

@@ -4,7 +4,12 @@
 #pragma once
 
 #include <format>
+#include <optional>
 #include <sstream>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 #include "Color.h"
 
@@ -12,12 +17,6 @@
 
 namespace cssparser
 {
-namespace rust
-{
-struct Dimension;
-struct Url;
-struct Value;
-}
 
 /*!
  * \class cssparser::Dimension
@@ -114,9 +113,6 @@ public:
      */
     std::string toString() const;
 
-    // Internal: Convert from a rust Dimension to C++ Dimension.
-    static Dimension fromRust(rust::Dimension rustData);
-
 private:
     Unit m_unit = Unit::Unknown;
     float m_value = 0.0;
@@ -205,9 +201,6 @@ public:
      * Returns a string representation of this value.
      */
     std::string toString() const;
-
-    // Internal: Convert from a rust Value to a C++ Value.
-    static Value fromRust(const rust::Value &rustData);
 
 private:
     Type m_type = Type::Empty;

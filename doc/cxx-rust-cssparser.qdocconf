@@ -4,7 +4,7 @@
 include($KDE_DOCS/global/qt-module-defaults.qdocconf)
 
 project = cxx-rust-cssparser
-description = A C++ library for parsing CSS that uses the Rust cssparser crate internally.
+description = A C++ library for parsing CSS.
 
 documentationinheaders = true
 

@@ -5,8 +5,6 @@
 
 #include <format>
 
-#include "ffi.rs.h"
-
 using namespace std::string_literals;
 
 namespace cssparser
@@ -19,17 +17,8 @@ AttributeMatch::AttributeMatch(const std::string &name, Operator op, const Value
 {
 }
 
-SelectorPart::SelectorPart()
+namespace
 {
-}
-
-SelectorPart::SelectorPart(Kind kind, const Value &value, std::optional<AttributeMatch> match)
-    : m_kind(kind)
-    , m_value(value)
-    , m_attributeMatch(match)
-{
-}
-
 std::string kindToString(SelectorPart::Kind kind)
 {
     switch (kind) {
@@ -65,6 +54,18 @@ std::string kindToString(SelectorPart::Kind kind)
 
     return "Unknown"s;
 }
+} // namespace
+
+SelectorPart::SelectorPart()
+{
+}
+
+SelectorPart::SelectorPart(Kind kind, const Value &value, std::optional<AttributeMatch> match)
+    : m_kind(kind)
+    , m_value(value)
+    , m_attributeMatch(match)
+{
+}
 
 std::string SelectorPart::toString() const
 {
@@ -80,82 +81,6 @@ std::string SelectorPart::toString() const
     default:
         return std::format("SelectorPart(type: {}, value: {})", kind, m_value.toString());
     }
-}
-
-inline SelectorPart::Kind convertKind(rust::SelectorKind rustKind)
-{
-    switch (rustKind) {
-    case rust::SelectorKind::Unknown:
-        return SelectorPart::Kind::Unknown;
-    case rust::SelectorKind::AnyElement:
-        return SelectorPart::Kind::AnyElement;
-    case rust::SelectorKind::Type:
-        return SelectorPart::Kind::Type;
-    case rust::SelectorKind::Class:
-        return SelectorPart::Kind::Class;
-    case rust::SelectorKind::Id:
-        return SelectorPart::Kind::Id;
-    case rust::SelectorKind::PseudoClass:
-        return SelectorPart::Kind::PseudoClass;
-    case rust::SelectorKind::Attribute:
-        return SelectorPart::Kind::Attribute;
-    case rust::SelectorKind::RelativeParent:
-        return SelectorPart::Kind::RelativeParent;
-    case rust::SelectorKind::DocumentRoot:
-        return SelectorPart::Kind::DocumentRoot;
-    case rust::SelectorKind::Part:
-        return SelectorPart::Kind::Part;
-    case rust::SelectorKind::DescendantCombinator:
-        return SelectorPart::Kind::DescendantCombinator;
-    case rust::SelectorKind::ChildCombinator:
-        return SelectorPart::Kind::ChildCombinator;
-    case rust::SelectorKind::PartCombinator:
-        return SelectorPart::Kind::PartCombinator;
-    }
-
-    assert(false && "Mismatch between SelectorPart kinds in C++ and Rust, update C++ code!");
-    return SelectorPart::Kind::Unknown;
-}
-
-inline AttributeMatch::Operator convertMatchOperator(rust::AttributeOperator op)
-{
-    switch (op) {
-    case rust::AttributeOperator::None:
-        return AttributeMatch::Operator::None;
-    case rust::AttributeOperator::Exists:
-        return AttributeMatch::Operator::Exists;
-    case rust::AttributeOperator::Equals:
-        return AttributeMatch::Operator::Equals;
-    case rust::AttributeOperator::Includes:
-        return AttributeMatch::Operator::Includes;
-    case rust::AttributeOperator::Prefixed:
-        return AttributeMatch::Operator::Prefixed;
-    case rust::AttributeOperator::Suffixed:
-        return AttributeMatch::Operator::Suffixed;
-    case rust::AttributeOperator::Substring:
-        return AttributeMatch::Operator::Substring;
-    case rust::AttributeOperator::DashMatch:
-        return AttributeMatch::Operator::DashMatch;
-    }
-
-    assert(false && "Mismatch between Attribute match operators in C++ and Rust, update C++ code!");
-    return AttributeMatch::Operator::None;
-}
-
-SelectorPart SelectorPart::fromRust(const rust::SelectorPart &rustData)
-{
-    auto result = SelectorPart{};
-
-    result.m_kind = convertKind(rustData.kind());
-    result.m_value = Value::fromRust(rustData.value());
-
-    if (rustData.attribute_operator() != rust::AttributeOperator::None) {
-        result.m_attributeMatch = AttributeMatch{std::string(rustData.attribute_name()),
-                                                 convertMatchOperator(rustData.attribute_operator()),
-                                                 Value::fromRust(rustData.attribute_value())};
-    }
-
-    return result;
 }
 
 Selector::Selector()
@@ -180,17 +105,6 @@ std::string Selector::toString() const
     }
 
     return std::format("Selector(parts: {})", parts);
-}
-
-Selector Selector::fromRust(const rust::Selector &rustData)
-{
-    auto result = Selector();
-
-    std::ranges::transform(rustData.parts(), std::back_inserter(result.m_parts), [](const auto &part) {
-        return SelectorPart::fromRust(part);
-    });
-
-    return result;
 }
 
 }
