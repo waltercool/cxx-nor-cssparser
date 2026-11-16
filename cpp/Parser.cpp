@@ -1887,17 +1887,6 @@ std::expected<ParsedValues, ParseError> parseValues(const ParsedPropertySyntax &
 namespace
 {
 
-struct DefinitionRegistry {
-    std::shared_mutex mutex;
-    std::vector<std::shared_ptr<PropertyDefinition>> definitions;
-};
-
-DefinitionRegistry &definitionRegistry()
-{
-    static DefinitionRegistry registry;
-    return registry;
-}
-
 struct FunctionRegistry {
     std::shared_mutex mutex;
     std::map<std::string, PropertyFunction> functions;
@@ -1905,11 +1894,9 @@ struct FunctionRegistry {
 
 } // namespace
 
-std::shared_ptr<const PropertyDefinition> propertyDefinition(const std::string &name)
+std::shared_ptr<const PropertyDefinition> DefinitionRegistry::find(const std::string &name) const
 {
-    auto &registry = definitionRegistry();
-    std::shared_lock lock(registry.mutex);
-    for (const auto &definition : registry.definitions) {
+    for (const auto &definition : definitions) {
         if (definition->name == name) {
             return definition;
         }
@@ -1917,17 +1904,35 @@ std::shared_ptr<const PropertyDefinition> propertyDefinition(const std::string &
     return nullptr;
 }
 
-bool addPropertyDefinition(const std::shared_ptr<PropertyDefinition> &definition)
+bool DefinitionRegistry::add(std::shared_ptr<PropertyDefinition> definition)
 {
-    auto &registry = definitionRegistry();
-    std::unique_lock lock(registry.mutex);
-    for (const auto &existing : registry.definitions) {
-        if (existing->name == definition->name) {
-            return false; // The first definition of a property wins.
-        }
+    if (find(definition->name)) {
+        return false; // The first definition of a property wins.
     }
-    registry.definitions.push_back(definition);
+    definitions.push_back(std::move(definition));
     return true;
+}
+
+void DefinitionRegistry::declareCustom(const std::string &name, std::vector<Value> values)
+{
+    for (auto &definition : definitions) {
+        if (definition->name != name) {
+            continue;
+        }
+        if (definition->custom) {
+            // Later declarations of a custom property update its value, so
+            // var() references after this point resolve to the new value.
+            definition->initial = std::move(values);
+        }
+        return;
+    }
+
+    auto definition = std::make_shared<PropertyDefinition>();
+    definition->name = name;
+    definition->syntax = std::make_shared<const ParsedPropertySyntax>(universalSyntax());
+    definition->custom = true;
+    definition->initial = std::move(values);
+    definitions.push_back(std::move(definition));
 }
 
 namespace
@@ -1952,8 +1957,9 @@ void skipToClosingParen(Parser &parser)
 }
 
 // `var(<name>, <fallback>?)`: resolves a custom property reference. When the
-// property is defined, its initial value is substituted and any fallback is
-// ignored; otherwise the fallback is parsed, as in CSS var().
+// property is defined in this stylesheet's registry, its initial value is
+// substituted and any fallback is ignored; otherwise the fallback is parsed,
+// as in CSS var(); with no fallback, this is an error naming the property.
 PropertyFunctionResult varFunction(Parser &parser)
 {
     auto name = parser.expectIdent();
@@ -1961,9 +1967,11 @@ PropertyFunctionResult varFunction(Parser &parser)
         return std::unexpected(name.error());
     }
 
-    if (auto definition = propertyDefinition(*name)) {
-        skipToClosingParen(parser);
-        return {definition->initial};
+    if (parser.registry) {
+        if (auto definition = parser.registry->find(*name)) {
+            skipToClosingParen(parser);
+            return {definition->initial};
+        }
     }
 
     if (!parser.checkDelim(',')) {
@@ -2480,8 +2488,13 @@ struct ParsedRule {
 
 struct SheetContext {
     ParsedSheet *sheet;
-    std::set<std::filesystem::path> *visited;
+    SheetParseState *state;
     std::filesystem::path basePath; // The file this sheet is parsed from, used for url() resolution.
+
+    DefinitionRegistry &registry() const
+    {
+        return state->registry;
+    }
 
     void record(ParseError error) const
     {
@@ -2526,7 +2539,7 @@ std::optional<ParsedDeclaration> parseDeclaration(Parser &parser, SheetContext &
     }
 
     const std::string propertyName = *name;
-    auto definition = propertyDefinition(propertyName);
+    auto definition = context.registry().find(propertyName);
 
     if (definition == nullptr) {
         if (propertyName.starts_with("--")) {
@@ -2539,11 +2552,7 @@ std::optional<ParsedDeclaration> parseDeclaration(Parser &parser, SheetContext &
                 return std::nullopt;
             }
 
-            auto customDefinition = std::make_shared<PropertyDefinition>();
-            customDefinition->name = propertyName;
-            customDefinition->syntax = std::make_shared<const ParsedPropertySyntax>(universalSyntax());
-            customDefinition->initial = values->values;
-            addPropertyDefinition(customDefinition);
+            context.registry().declareCustom(propertyName, std::move(values->values));
             return std::nullopt;
         }
 
@@ -2588,7 +2597,7 @@ void handleImport(Parser &parser, SheetContext &context)
     }
     importPath = importPath.lexically_normal();
 
-    if (context.visited->contains(importPath)) {
+    if (context.state->visited.contains(importPath)) {
         return; // Import cycle or duplicate; skip silently.
     }
 
@@ -2606,8 +2615,12 @@ void handleImport(Parser &parser, SheetContext &context)
     std::ostringstream buffer;
     buffer << file.rdbuf();
 
-    context.visited->insert(importPath);
-    auto imported = parseSheetText(buffer.str(), importPath, *context.visited);
+    // Parse the imported file with a fresh child context that shares this
+    // sheet's parse state (the definition registry and the visited set), so
+    // definitions imported here stay visible to the parent and to any
+    // sibling imports, and cycles are still guarded against.
+    context.state->visited.insert(importPath);
+    auto imported = parseSheetText(buffer.str(), importPath, *context.state);
 
     context.sheet->rules.insert(context.sheet->rules.end(), std::make_move_iterator(imported.rules.begin()), std::make_move_iterator(imported.rules.end()));
     context.sheet->errors.insert(context.sheet->errors.end(), std::make_move_iterator(imported.errors.begin()), std::make_move_iterator(imported.errors.end()));
@@ -2746,7 +2759,7 @@ void parsePropertyAtRule(Parser &parser, SheetContext &context)
         return;
     }
 
-    addPropertyDefinition(definition); // The first definition of a property wins.
+    context.registry().add(definition); // The first definition of a property wins.
 }
 
 void handleAtRule(Parser &parser, SheetContext &context, bool topLevel);
@@ -2893,14 +2906,15 @@ std::vector<Rule> flattenRule(const ParsedRule &rule, const Selector *parent, co
 
 } // namespace
 
-ParsedSheet parseSheetText(const std::string &text, const std::filesystem::path &sourcePath, std::set<std::filesystem::path> &visited)
+ParsedSheet parseSheetText(const std::string &text, const std::filesystem::path &sourcePath, SheetParseState &state)
 {
     ParsedSheet sheet;
     sheet.paths.push_back(sourcePath);
-    visited.insert(sourcePath);
+    state.visited.insert(sourcePath);
 
     Parser parser(tokenize(text), sourcePath.empty() ? std::string("<string>") : sourcePath.string());
-    SheetContext context{.sheet = &sheet, .visited = &visited, .basePath = sourcePath};
+    parser.registry = &state.registry;
+    SheetContext context{.sheet = &sheet, .state = &state, .basePath = sourcePath};
 
     while (!parser.atEnd()) {
         const size_t before = parser.mark();
@@ -2929,7 +2943,7 @@ ParsedSheet parseSheetText(const std::string &text, const std::filesystem::path 
     return sheet;
 }
 
-ParsedSheet parseSheetFile(const std::filesystem::path &path, std::set<std::filesystem::path> &visited)
+ParsedSheet parseSheetFile(const std::filesystem::path &path, SheetParseState &state)
 {
     std::ifstream file(path);
     if (!file.is_open()) {
@@ -2947,7 +2961,7 @@ ParsedSheet parseSheetFile(const std::filesystem::path &path, std::set<std::file
     std::ostringstream buffer;
     buffer << file.rdbuf();
 
-    return parseSheetText(buffer.str(), path, visited);
+    return parseSheetText(buffer.str(), path, state);
 }
 
 }

@@ -225,6 +225,114 @@ void testVarBehaviour()
                 });
 }
 
+// Collect the `width` values (as strings) for rules whose selector mentions
+// `selectorNeedle`, so a test can assert on the resolved value.
+std::vector<std::string> widthValuesFor(const StyleSheet &sheet, const std::string &selectorNeedle)
+{
+    std::vector<std::string> result;
+    for (const auto &rule : sheet.rules()) {
+        if (rule.selector().toString().find(selectorNeedle) == std::string::npos) {
+            continue;
+        }
+        for (const auto &property : rule.properties()) {
+            if (property.name() == "width") {
+                std::string joined;
+                for (const auto &value : property.values()) {
+                    joined += value.toString() + " ";
+                }
+                result.push_back(joined);
+            }
+        }
+    }
+    return result;
+}
+
+void testPerStylesheetScoping()
+{
+    // Property definitions are scoped to a stylesheet and its imports; they do
+    // not leak between independent stylesheets parsed in the same process.
+    // This mirrors the behaviour the Rust implementation gained in
+    // "Scope property definitions to each stylesheet and its imports".
+
+    // 1) Two stylesheets with the same `@property width` and their own `--size`
+    //    must each resolve `var(--size)` to their own value.
+    {
+        StyleSheet first("<test>");
+        first.parseString(R"(@property width { syntax: "<length>"; }
+                             :root { --size: 10px; }
+                             button { width: var(--size); })");
+        StyleSheet second("<test>");
+        second.parseString(R"(@property width { syntax: "<length>"; }
+                              :root { --size: 20px; }
+                              button { width: var(--size); })");
+
+        auto w1 = widthValuesFor(first, "button");
+        check(w1.size() == 1 && w1[0].find("10") != std::string::npos, "first sheet resolves --size to 10px");
+        auto w2 = widthValuesFor(second, "button");
+        check(w2.size() == 1 && w2[0].find("20") != std::string::npos, "second sheet resolves --size to its own 20px");
+
+        // A re-parse of the first sheet still resolves to 10px (its registry persists).
+        first.parseString("button { width: var(--size); }");
+        auto w1b = widthValuesFor(first, "button");
+        check(w1b.size() == 2 && w1b[1].find("10") != std::string::npos, "re-parse on first sheet stays 10px");
+    }
+
+    // 2) Independent stylesheets can define different syntax for the same name.
+    {
+        // Silence `width` here as <color> rather than inheriting a <length> from
+        // an earlier sheet in the same process.
+        StyleSheet sheet("<test>");
+        sheet.parseString(R"(@property width { syntax: "<color>"; }
+                             button { width: blue; })");
+        check(sheet.errors().empty(), "independent sheet can redefine width syntax as <color>");
+        auto w = widthValuesFor(sheet, "button");
+        // Blue is RGBA(0, 0, 255, 255); "blue" would fail <length> validation.
+        check(w.size() == 1 && w[0].find("255") != std::string::npos, "width resolves to a color under <color> syntax");
+    }
+
+    // 3) A variable defined in another sheet does not suppress a local fallback.
+    {
+        StyleSheet other("<test>");
+        other.parseString(R"(@property width { syntax: "<length>"; }
+                             :root { --size: 10px; })");
+        StyleSheet sheet("<test>");
+        sheet.parseString(R"(@property width { syntax: "<length>"; }
+                             button { width: var(--size, 42px); })");
+        auto w = widthValuesFor(sheet, "button");
+        check(w.size() == 1 && w[0].find("42") != std::string::npos, "local fallback 42px used even though --size exists elsewhere");
+    }
+
+    // 4) Imports share definitions with their parent and siblings.
+    {
+        const std::filesystem::path dir = dataPath("property_definitions");
+        StyleSheet sheet(dir / "parent.css");
+        sheet.import("api-imported-definitions.css");
+        sheet.parse();
+        check(sheet.errors().empty(), "import-sharing sheet parses without errors");
+
+        auto nested = widthValuesFor(sheet, "nested");
+        check(nested.size() == 1 && nested[0].find("5") != std::string::npos, "nested uses shared --small (5px)");
+        auto sibling = widthValuesFor(sheet, "sibling");
+        check(sibling.size() == 1 && sibling[0].find("12") != std::string::npos, "sibling uses --from-child (12px)");
+        auto button = widthValuesFor(sheet, "button");
+        check(button.size() == 1 && button[0].find("12") != std::string::npos, "button uses --from-child (12px)");
+    }
+
+    // 5) @property descriptors and nested fallbacks resolve variables locally.
+    {
+        StyleSheet sheet("<test>");
+        sheet.parseString(R"(@property width { syntax: "<length>"; }
+                             :root { --size: 10px; }
+                             button { width: var(--missing, var(--size)); }
+                             other { width: var(--missing, var(--also-missing, 30px)); })");
+        check(sheet.errors().empty(), "nested var() fallbacks parse without errors");
+        auto b = widthValuesFor(sheet, "button");
+        check(b.size() == 1 && b[0].find("10") != std::string::npos, "var(--missing, var(--size)) resolves to 10px");
+        auto o = widthValuesFor(sheet, "other");
+        check(o.size() == 1 && o[0].find("30") != std::string::npos, "double-nested fallback resolves to 30px");
+    }
+}
+
 } // namespace
 
 int main()
@@ -237,6 +345,7 @@ int main()
     testImportAtNonTopLevel();
     testDanglingCombinator();
     testVarBehaviour();
+    testPerStylesheetScoping();
 
     if (gFailed > 0) {
         std::cerr << gFailed << " test(s) failed" << std::endl;

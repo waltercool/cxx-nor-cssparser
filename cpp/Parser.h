@@ -66,6 +66,8 @@ struct ParseError {
  * The whole input is pre-tokenized; all parsing operations work on the
  * resulting vector, which makes backtracking trivial and cheap.
  */
+struct DefinitionRegistry;
+
 class Parser
 {
 public:
@@ -171,6 +173,11 @@ public:
 
     const std::string &sourceName() const;
 
+    // The property definition registry this parser resolves definitions and
+    // var() references against. Owned by the parse state of the stylesheet
+    // being parsed; set before parsing begins. When null, every lookup misses.
+    DefinitionRegistry *registry = nullptr;
+
 private:
     std::vector<Token> m_tokens;
     size_t m_pos = 0;
@@ -188,16 +195,58 @@ using PropertyFunction = std::function<PropertyFunctionResult(Parser &)>;
 std::optional<PropertyFunction> propertyFunction(std::string_view name);
 bool addPropertyFunction(std::string_view name, PropertyFunction function);
 
-// The global registry of custom property definitions (`@property`).
-// Definitions are shared process-wide, like CSS custom properties at the root.
-std::shared_ptr<const struct PropertyDefinition> propertyDefinition(const std::string &name);
-bool addPropertyDefinition(const std::shared_ptr<struct PropertyDefinition> &definition);
+struct PropertyDefinition;
+
+/*!
+ * A registry of custom property definitions (`@property` rules and
+ * `--custom-property: value` declarations). *
+ * Each stylesheet owns one registry (see SheetParseState). Definitions are
+ * scoped to the stylesheet they belong to and the files it imports; they do
+ * not leak between independent stylesheets. A registry is used from whichever
+ * thread parses its stylesheet, so concurrent parsing of the same sheet is
+ * the caller's responsibility.
+ */
+struct DefinitionRegistry {
+    /*!
+     * Returns the definition of \a name, or nullptr when this sheet has no
+     * definition for it.
+     */
+    std::shared_ptr<const PropertyDefinition> find(const std::string &name) const;
+
+    /*!
+     * Registers \a definition. The first definition of a property wins; later
+     * definitions of the same name are ignored.
+     * Returns true when the definition was added.
+     */
+    bool add(std::shared_ptr<PropertyDefinition> definition);
+
+    /*!
+     * Declares a custom property `--name` with the given values, as produced by
+     * a `--name: value` declaration. Updates the value of an existing
+     * custom-property declaration in place, so later var() references resolve
+     * to the most recently declared value.
+     */
+    void declareCustom(const std::string &name, std::vector<Value> values);
+
+    std::vector<std::shared_ptr<PropertyDefinition>> definitions;
+};
 
 struct PropertyDefinition {
     std::string name;
     std::shared_ptr<const struct ParsedPropertySyntax> syntax;
     bool inherit = false;
     std::vector<Value> initial;
+    bool custom = false; //< True when created by a `--name: value` declaration instead of `@property`.
+};
+
+/*!
+ * State that is shared across all parse operations of one StyleSheet: the set
+ * of files already imported (guarding against import cycles and duplicates)
+ * and the stylesheet's property definition registry.
+ */
+struct SheetParseState {
+    std::set<std::filesystem::path> visited;
+    DefinitionRegistry registry;
 };
 
 /*!
@@ -216,17 +265,18 @@ struct ParsedSheet {
  * The parser follows the structure of the CSS grammar: qualified rules with
  * declarations and nested rules, `@property` definitions, and top level
  * `@import` statements, which are recursively parsed relative to the directory
- * of \a sourcePath. \a visited is used to guard against import cycles; pass an
- * empty set to start a new parse.
+ * of \a sourcePath. \a state carries the per-stylesheet parse state (visited
+ * files and property definitions); pass a fresh SheetParseState for each
+ * independent stylesheet, or the same one to all parses that belong to one
+ * stylesheet so definitions and imports stay shared between them.
  */
-ParsedSheet parseSheetText(const std::string &text, const std::filesystem::path &sourcePath, std::set<std::filesystem::path> &visited);
+ParsedSheet parseSheetText(const std::string &text, const std::filesystem::path &sourcePath, SheetParseState &state);
 
 /*!
  * Read the file at \a path and parse it as a stylesheet.
  *
  * On IO failure an Error with kind "IO Error" is recorded instead of throwing.
  */
-ParsedSheet parseSheetFile(const std::filesystem::path &path, std::set<std::filesystem::path> &visited);
-
+ParsedSheet parseSheetFile(const std::filesystem::path &path, SheetParseState &state);
 }
 }

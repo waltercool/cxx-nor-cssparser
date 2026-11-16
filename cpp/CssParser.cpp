@@ -49,6 +49,12 @@ struct StyleSheet::Private {
 
     std::filesystem::path path;
 
+    // Parse state shared by this stylesheet and everything it imports: the
+    // property definition registry and the import-cycle guard. Keeping this on
+    // the sheet (instead of process-global) is what stops definitions from
+    // leaking between independent stylesheets, e.g. after a theme switch.
+    detail::SheetParseState state;
+
     std::vector<Rule> rules;
     std::vector<Error> errors;
     std::vector<std::filesystem::path> paths;
@@ -56,8 +62,7 @@ struct StyleSheet::Private {
 
 void StyleSheet::Private::parseText(const std::string &text, const std::filesystem::path &sourcePath)
 {
-    std::set<std::filesystem::path> visited;
-    auto sheet = detail::parseSheetText(text, sourcePath, visited);
+    auto sheet = detail::parseSheetText(text, sourcePath, state);
 
     paths.insert(paths.end(), std::make_move_iterator(sheet.paths.begin()), std::make_move_iterator(sheet.paths.end()));
     rules.insert(rules.end(), std::make_move_iterator(sheet.rules.begin()), std::make_move_iterator(sheet.rules.end()));
@@ -66,8 +71,7 @@ void StyleSheet::Private::parseText(const std::string &text, const std::filesyst
 
 void StyleSheet::Private::parseFile(const std::filesystem::path &filePath)
 {
-    std::set<std::filesystem::path> visited;
-    auto sheet = detail::parseSheetFile(filePath, visited);
+    auto sheet = detail::parseSheetFile(filePath, state);
 
     paths.insert(paths.end(), std::make_move_iterator(sheet.paths.begin()), std::make_move_iterator(sheet.paths.end()));
     rules.insert(rules.end(), std::make_move_iterator(sheet.rules.begin()), std::make_move_iterator(sheet.rules.end()));
